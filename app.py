@@ -3,18 +3,14 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 
-# ─── Configuración de la página ────────────────────────────────────────────
 st.set_page_config(
     page_title="BuscaContrato — SECOP II",
     page_icon="🔍",
     layout="wide"
 )
 
-# ─── Estilos personalizados ─────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { background: white; border-radius: 10px; padding: 10px; }
     .contrato-card {
         background: white;
         border-radius: 12px;
@@ -37,7 +33,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Header ────────────────────────────────────────────────────────────────
 col_logo, col_titulo = st.columns([1, 5])
 with col_logo:
     st.markdown("## 🔍")
@@ -47,50 +42,19 @@ with col_titulo:
 
 st.divider()
 
-# ─── Función de búsqueda en API de datos abiertos ──────────────────────────
-@st.cache_data(ttl=300)  # Cache 5 minutos
+@st.cache_data(ttl=300)
 def buscar_contratos(palabras_clave, departamento, estado, tipo_proceso,
                      fecha_desde, fecha_hasta, limite=50):
-    """
-    Consulta la API de datos abiertos de Colombia (SODA)
-    Dataset: SECOP II - Procesos de Contratación (p6dx-8zbt)
-    """
     BASE_URL = "https://www.datos.gov.co/resource/p6dx-8zbt.json"
-
-    # Construir filtro WHERE
     filtros = []
 
     if departamento and departamento != "Todos":
-        filtros.append(f"upper(departamento_entidad) = upper('{departamento}')")
-
-    if estado and estado != "Todos":
-        filtros.append(f"upper(estado_del_proceso) = upper('{estado}')")
-
-    if tipo_proceso and tipo_proceso != "Todos":
-        # Mapeo sin tildes para compatibilidad con la API
-        tipos_map = {
-            "Mínima cuantía": "MINIMA CUANTIA",
-            "Contratación directa": "CONTRATACION DIRECTA",
-            "Selección abreviada": "SELECCION ABREVIADA",
-            "Licitación pública": "LICITACION PUBLICA",
-            "Concurso de méritos": "CONCURSO DE MERITOS",
-        }
-        tipo_limpio = tipos_map.get(tipo_proceso, tipo_proceso.upper())
-        filtros.append(f"upper(modalidad_de_contratacion) like upper('%{tipo_limpio}%')")
+        filtros.append(f"departamento_entidad='{departamento}'")
 
     if fecha_desde:
         filtros.append(f"fecha_de_publicacion >= '{fecha_desde}T00:00:00'")
-
     if fecha_hasta:
         filtros.append(f"fecha_de_publicacion <= '{fecha_hasta}T23:59:59'")
-
-    # Búsqueda por palabras clave en descripción o nombre entidad
-    if palabras_clave:
-        termino = palabras_clave.replace("'", "''")
-        filtros.append(
-            f"(upper(descripcion_del_proceso) like upper('%{termino}%') "
-            f"OR upper(nombre_entidad) like upper('%{termino}%'))"
-        )
 
     params = {
         "$limit": limite,
@@ -100,11 +64,27 @@ def buscar_contratos(palabras_clave, departamento, estado, tipo_proceso,
         params["$where"] = " AND ".join(filtros)
 
     try:
-        resp = requests.get(BASE_URL, params=params, timeout=15)
+        resp = requests.get(BASE_URL, params=params, timeout=20)
         resp.raise_for_status()
-        return resp.json(), None
+        datos = resp.json()
+
+        # Filtros locales (más confiables que la API para texto con tildes)
+        if estado and estado != "Todos":
+            datos = [d for d in datos if estado.lower() in str(d.get("estado_del_proceso", "")).lower()]
+
+        if tipo_proceso and tipo_proceso != "Todos":
+            tipo_norm = tipo_proceso.lower().replace("í","i").replace("ó","o").replace("é","e").replace("á","a").replace("ú","u")
+            datos = [d for d in datos if tipo_norm in str(d.get("modalidad_de_contratacion", "")).lower().replace("í","i").replace("ó","o").replace("é","e").replace("á","a").replace("ú","u")]
+
+        if palabras_clave:
+            kw = palabras_clave.lower()
+            datos = [d for d in datos if
+                     kw in str(d.get("descripcion_del_proceso", "")).lower() or
+                     kw in str(d.get("nombre_entidad", "")).lower()]
+
+        return datos, None
     except requests.exceptions.ConnectionError:
-        return None, "❌ No se pudo conectar. Verifica tu conexión a internet."
+        return None, "❌ No se pudo conectar. Verifica tu conexión."
     except requests.exceptions.Timeout:
         return None, "⏱️ La consulta tardó demasiado. Intenta de nuevo."
     except Exception as e:
@@ -112,7 +92,6 @@ def buscar_contratos(palabras_clave, departamento, estado, tipo_proceso,
 
 
 def formatear_valor(valor_str):
-    """Formatea el valor del contrato a pesos colombianos legibles."""
     try:
         valor = float(valor_str)
         if valor >= 1_000_000_000:
@@ -142,14 +121,12 @@ def get_color_estado(estado):
     return "#555"
 
 
-# ─── Panel de filtros ───────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Filtros de búsqueda")
 
     palabras = st.text_input(
         "🔎 Palabras clave",
         placeholder="Ej: mantenimiento, consultoria, suministro...",
-        help="Busca en el título y descripción del proceso"
     )
 
     departamento = st.selectbox("📍 Departamento", [
@@ -157,12 +134,12 @@ with st.sidebar:
         "CUNDINAMARCA", "ATLÁNTICO", "SANTANDER", "BOLÍVAR",
         "NARIÑO", "CÓRDOBA", "TOLIMA", "RISARALDA", "CALDAS",
         "CAUCA", "HUILA", "META", "BOYACÁ", "MAGDALENA"
-    ], index=1)  # Valle del Cauca por defecto
+    ], index=1)
 
     estado = st.selectbox("📋 Estado del proceso", [
         "Todos", "Publicado", "Adjudicado", "Celebrado",
         "Desierto", "Terminado", "Suspendido"
-    ], index=1)  # Publicado por defecto
+    ], index=1)
 
     tipo_proceso = st.selectbox("📝 Tipo de proceso", [
         "Todos", "Mínima cuantía", "Contratación directa",
@@ -173,15 +150,9 @@ with st.sidebar:
     st.markdown("**📅 Rango de fechas**")
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        fecha_desde = st.date_input(
-            "Desde",
-            value=datetime.now() - timedelta(days=7)
-        )
+        fecha_desde = st.date_input("Desde", value=datetime.now() - timedelta(days=7))
     with col_f2:
-        fecha_hasta = st.date_input(
-            "Hasta",
-            value=datetime.now()
-        )
+        fecha_hasta = st.date_input("Hasta", value=datetime.now())
 
     limite = st.slider("Máximo de resultados", 10, 200, 50, 10)
 
@@ -191,10 +162,8 @@ with st.sidebar:
     st.markdown("**💡 Consejos:**")
     st.markdown("- Usa palabras del objeto del contrato")
     st.markdown("- Ejemplo: *construcción*, *software*, *aseo*")
-    st.markdown("- Combina con tipo de proceso para afinar")
 
 
-# ─── Resultados ─────────────────────────────────────────────────────────────
 if buscar or "resultados" in st.session_state:
 
     if buscar:
@@ -216,16 +185,13 @@ if buscar or "resultados" in st.session_state:
 
     if error:
         st.error(error)
-
     elif datos is not None:
         if len(datos) == 0:
-            st.warning("⚠️ No se encontraron contratos con esos criterios. Intenta ampliar el rango de fechas o cambiar las palabras clave.")
+            st.warning("⚠️ No se encontraron contratos. Intenta ampliar el rango de fechas o cambiar los filtros.")
         else:
-            # Métricas resumen
             df = pd.DataFrame(datos)
             total = len(df)
 
-            # Calcular valor total aproximado
             try:
                 valor_total = df["valor_total_estimado"].dropna().astype(float).sum()
             except:
@@ -241,7 +207,6 @@ if buscar or "resultados" in st.session_state:
 
             st.divider()
 
-            # Tabs: tarjetas y tabla
             tab1, tab2 = st.tabs(["📋 Vista por contratos", "📊 Vista tabla"])
 
             with tab1:
@@ -254,16 +219,12 @@ if buscar or "resultados" in st.session_state:
                     fecha_pub = str(row.get("fecha_de_publicacion", ""))[:10]
                     ciudad = row.get("ciudad_entidad", "")
                     url_proceso = row.get("urlproceso", {})
-                    if isinstance(url_proceso, dict):
-                        url = url_proceso.get("url", "")
-                    else:
-                        url = ""
-
+                    url = url_proceso.get("url", "") if isinstance(url_proceso, dict) else ""
                     color = get_color_estado(estado_proc)
 
                     st.markdown(f"""
                     <div class="contrato-card" style="border-left-color: {color}">
-                        <div style="font-weight:600; font-size:15px; margin-bottom:6px">{nombre[:200]}</div>
+                        <div style="font-weight:600; font-size:15px; margin-bottom:6px">{str(nombre)[:200]}</div>
                         <div class="entidad">🏛️ {entidad} &nbsp;|&nbsp; 📍 {ciudad}</div>
                         <div style="margin-top:8px">
                             <span class="tag">{estado_proc}</span>
@@ -275,7 +236,7 @@ if buscar or "resultados" in st.session_state:
                     """, unsafe_allow_html=True)
 
                     if url:
-                        st.markdown(f"[🔗 Ver proceso en SECOP II]({url})", unsafe_allow_html=False)
+                        st.markdown(f"[🔗 Ver proceso en SECOP II]({url})")
 
             with tab2:
                 cols_mostrar = [c for c in [
@@ -288,17 +249,15 @@ if buscar or "resultados" in st.session_state:
                 df_show.columns = [c.replace("_", " ").title() for c in cols_mostrar]
                 st.dataframe(df_show, use_container_width=True, height=500)
 
-                # Botón de descarga
                 csv = df_show.to_csv(index=False).encode("utf-8")
                 st.download_button(
-                    "⬇️ Descargar resultados en Excel/CSV",
+                    "⬇️ Descargar resultados CSV",
                     data=csv,
                     file_name=f"contratos_secop_{datetime.now().strftime('%Y%m%d')}.csv",
                     mime="text/csv"
                 )
 
 else:
-    # Pantalla de bienvenida
     st.markdown("""
     <div style="text-align:center; padding: 60px 20px">
         <div style="font-size:64px">🔍</div>
@@ -309,8 +268,6 @@ else:
             de negocio en SECOP II automáticamente.
         </p>
         <br>
-        <p style="color:#999; font-size:13px">
-            Datos actualizados diariamente por Colombia Compra Eficiente
-        </p>
+        <p style="color:#999; font-size:13px">Datos actualizados diariamente por Colombia Compra Eficiente</p>
     </div>
     """, unsafe_allow_html=True)
