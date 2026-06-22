@@ -67,7 +67,16 @@ def buscar_contratos(palabras_clave, departamento, estado, tipo_proceso,
         filtros.append(f"upper(estado_del_proceso) = upper('{estado}')")
 
     if tipo_proceso and tipo_proceso != "Todos":
-        filtros.append(f"upper(modalidad_de_contratacion) = upper('{tipo_proceso}')")
+        # Mapeo sin tildes para compatibilidad con la API
+        tipos_map = {
+            "Mínima cuantía": "MINIMA CUANTIA",
+            "Contratación directa": "CONTRATACION DIRECTA",
+            "Selección abreviada": "SELECCION ABREVIADA",
+            "Licitación pública": "LICITACION PUBLICA",
+            "Concurso de méritos": "CONCURSO DE MERITOS",
+        }
+        tipo_limpio = tipos_map.get(tipo_proceso, tipo_proceso.upper())
+        filtros.append(f"upper(modalidad_de_contratacion) like upper('%{tipo_limpio}%')")
 
     if fecha_desde:
         filtros.append(f"fecha_de_publicacion >= '{fecha_desde}T00:00:00'")
