@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 st.set_page_config(
-    page_title="BuscaContrato — SECOP II",
+    page_title="Licitapp — SECOP II",
     page_icon="🔍",
     layout="wide"
 )
@@ -37,7 +37,7 @@ col_logo, col_titulo = st.columns([1, 5])
 with col_logo:
     st.markdown("## 🔍")
 with col_titulo:
-    st.markdown("# BuscaContrato")
+    st.markdown("# Licitapp")
     st.markdown("*Buscador inteligente de oportunidades en SECOP II*")
 
 st.divider()
@@ -52,13 +52,13 @@ def buscar_contratos(palabras_clave, departamento, estado, tipo_proceso,
         filtros.append(f"departamento_entidad='{departamento}'")
 
     if fecha_desde:
-        filtros.append(f"fecha_de_publicacion >= '{fecha_desde}T00:00:00'")
+        filtros.append(f"fecha_de_publicacion_del >= '{fecha_desde}T00:00:00'")
     if fecha_hasta:
-        filtros.append(f"fecha_de_publicacion <= '{fecha_hasta}T23:59:59'")
+        filtros.append(f"fecha_de_publicacion_del <= '{fecha_hasta}T23:59:59'")
 
     params = {
         "$limit": limite,
-        "$order": "fecha_de_publicacion DESC",
+        "$order": "fecha_de_publicacion_del DESC",
     }
     if filtros:
         params["$where"] = " AND ".join(filtros)
@@ -70,7 +70,7 @@ def buscar_contratos(palabras_clave, departamento, estado, tipo_proceso,
 
         # Filtros locales (más confiables que la API para texto con tildes)
         if estado and estado != "Todos":
-            datos = [d for d in datos if estado.lower() in str(d.get("estado_del_proceso", "")).lower()]
+            datos = [d for d in datos if estado.lower() in str(d.get("fase", "")).lower()]
 
         if tipo_proceso and tipo_proceso != "Todos":
             tipo_norm = tipo_proceso.lower().replace("í","i").replace("ó","o").replace("é","e").replace("á","a").replace("ú","u")
@@ -79,8 +79,8 @@ def buscar_contratos(palabras_clave, departamento, estado, tipo_proceso,
         if palabras_clave:
             kw = palabras_clave.lower()
             datos = [d for d in datos if
-                     kw in str(d.get("descripcion_del_proceso", "")).lower() or
-                     kw in str(d.get("nombre_entidad", "")).lower()]
+                     kw in str(d.get("descripci_n_del_procedimiento", "")).lower() or
+                     kw in str(d.get("entidad", "")).lower()]
 
         return datos, None
     except requests.exceptions.ConnectionError:
@@ -130,15 +130,17 @@ with st.sidebar:
     )
 
     departamento = st.selectbox("📍 Departamento", [
-        "Todos", "VALLE DEL CAUCA", "ANTIOQUIA", "BOGOTÁ D.C.",
+        "Todos", "Valle del Cauca", "ANTIOQUIA", "BOGOTÁ D.C.",
         "CUNDINAMARCA", "ATLÁNTICO", "SANTANDER", "BOLÍVAR",
         "NARIÑO", "CÓRDOBA", "TOLIMA", "RISARALDA", "CALDAS",
         "CAUCA", "HUILA", "META", "BOYACÁ", "MAGDALENA"
     ], index=1)
 
-    estado = st.selectbox("📋 Estado del proceso", [
-        "Todos", "Publicado", "Adjudicado", "Celebrado",
-        "Desierto", "Terminado", "Suspendido"
+    estado = st.selectbox("📋 Fase del proceso", [
+        "Todos", "Presentación de oferta", "Fase de ofertas",
+        "Fase de Concurso", "Presentación de observaciones",
+        "Manifestación de interés (Menor Cuantía)",
+        "Pré-Calificación de competidores", "Proceso de ofertas"
     ], index=1)
 
     tipo_proceso = st.selectbox("📝 Tipo de proceso", [
@@ -193,11 +195,11 @@ if buscar or "resultados" in st.session_state:
             total = len(df)
 
             try:
-                valor_total = df["valor_total_estimado"].dropna().astype(float).sum()
+                valor_total = df["precio_base"].dropna().astype(float).sum()
             except:
                 valor_total = 0
 
-            entidades_unicas = df["nombre_entidad"].nunique() if "nombre_entidad" in df.columns else 0
+            entidades_unicas = df["entidad"].nunique() if "entidad" in df.columns else 0
 
             st.markdown(f"### ✅ {total} contratos encontrados")
             col1, col2, col3 = st.columns(3)
@@ -211,12 +213,12 @@ if buscar or "resultados" in st.session_state:
 
             with tab1:
                 for _, row in df.iterrows():
-                    nombre = row.get("descripcion_del_proceso") or row.get("nombre_proceso") or "Sin descripción"
-                    entidad = row.get("nombre_entidad", "Entidad no especificada")
-                    valor = formatear_valor(row.get("valor_total_estimado", "0"))
-                    estado_proc = row.get("estado_del_proceso", "")
+                    nombre = row.get("descripci_n_del_procedimiento") or row.get("nombre_del_procedimiento") or "Sin descripción"
+                    entidad = row.get("entidad", "Entidad no especificada")
+                    valor = formatear_valor(row.get("precio_base", "0"))
+                    estado_proc = row.get("fase", "")
                     modalidad = row.get("modalidad_de_contratacion", "")
-                    fecha_pub = str(row.get("fecha_de_publicacion", ""))[:10]
+                    fecha_pub = str(row.get("fecha_de_publicacion_del", ""))[:10]
                     ciudad = row.get("ciudad_entidad", "")
                     url_proceso = row.get("urlproceso", {})
                     url = url_proceso.get("url", "") if isinstance(url_proceso, dict) else ""
@@ -240,9 +242,9 @@ if buscar or "resultados" in st.session_state:
 
             with tab2:
                 cols_mostrar = [c for c in [
-                    "descripcion_del_proceso", "nombre_entidad", "ciudad_entidad",
-                    "valor_total_estimado", "estado_del_proceso",
-                    "modalidad_de_contratacion", "fecha_de_publicacion"
+                    "descripci_n_del_procedimiento", "entidad", "ciudad_entidad",
+                    "precio_base", "fase",
+                    "modalidad_de_contratacion", "fecha_de_publicacion_del"
                 ] if c in df.columns]
 
                 df_show = df[cols_mostrar].copy()
@@ -261,7 +263,7 @@ else:
     st.markdown("""
     <div style="text-align:center; padding: 60px 20px">
         <div style="font-size:64px">🔍</div>
-        <h2>Bienvenido a BuscaContrato</h2>
+        <h2>Bienvenido a Licitapp</h2>
         <p style="color:#666; font-size:16px; max-width:500px; margin:0 auto">
             Configura tus filtros en el panel izquierdo y haz clic en
             <strong>Buscar contratos</strong> para encontrar oportunidades
